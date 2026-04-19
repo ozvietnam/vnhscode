@@ -1,0 +1,37 @@
+name: Download Douyin video
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Link chia sẻ Douyin (vd: https://v.douyin.com/ltVY25xQeBQ/) hoặc cả đoạn text chia sẻ"
+        required: true
+        type: string
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: pip install requests
+
+      - name: Download video
+        run: |
+          mkdir -p downloads
+          python3 douyin_downloader.py "${{ inputs.url }}" -o ./downloads
+
+      - name: List downloaded files
+        run: ls -lh downloads/
+
+      - name: Upload video artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: douyin-video
+          path: downloads/*
+          retention-days: 7
