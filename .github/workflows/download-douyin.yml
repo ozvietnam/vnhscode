@@ -4,9 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       url:
-        description: "Link chia sẻ Douyin (vd: https://v.douyin.com/ltVY25xQeBQ/) hoặc cả đoạn text chia sẻ"
+        description: "Link chia sẻ Douyin"
         required: true
         type: string
+  push:
+    paths:
+      - "videos/REQUEST.txt"
+    branches:
+      - "claude/**"
+
+permissions:
+  contents: write
 
 jobs:
   download:
@@ -21,17 +29,38 @@ jobs:
       - name: Install deps
         run: pip install requests
 
+      - name: Resolve URL
+        id: resolve
+        run: |
+          if [ -n "${{ inputs.url }}" ]; then
+            echo "url=${{ inputs.url }}" >> "$GITHUB_OUTPUT"
+          else
+            # First non-empty, non-comment line of videos/REQUEST.txt
+            line=$(grep -vE '^\s*(#|$)' videos/REQUEST.txt | head -n1)
+            echo "url=$line" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Download video
         run: |
-          mkdir -p downloads
-          python3 douyin_downloader.py "${{ inputs.url }}" -o ./downloads
+          mkdir -p videos
+          python3 douyin_downloader.py "${{ steps.resolve.outputs.url }}" -o ./videos
 
-      - name: List downloaded files
-        run: ls -lh downloads/
-
-      - name: Upload video artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: douyin-video
-          path: downloads/*
+          path: videos/*.mp4
           retention-days: 7
+
+      - name: Commit video back to branch
+        if: github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add videos/*.mp4 || true
+          if git diff --cached --quiet; then
+            echo "No video file to commit"
+          else
+            git commit -m "Add downloaded Douyin video [skip ci]"
+            git push origin HEAD:${{ github.ref_name }}
+          fi
