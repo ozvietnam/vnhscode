@@ -10,9 +10,12 @@ Cách dùng:
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import urllib.parse
 from typing import Optional
@@ -141,23 +144,54 @@ def download(share_text: str, out_dir: str = ".", filename: Optional[str] = None
     share_url = extract_share_url(share_text)
     print(f"[1/4] Link chia sẻ: {share_url}")
 
-    video_id, final_url = resolve_video_id(share_url)
-    print(f"[2/4] Video ID   : {video_id}")
+    try:
+        video_id, final_url = resolve_video_id(share_url)
+        print(f"[2/4] Video ID   : {video_id}")
 
-    info = fetch_video_info(video_id)
-    title = info.get("desc") or info.get("description") or video_id
-    author = (info.get("author") or {}).get("nickname", "")
-    print(f"[3/4] Tiêu đề    : {title[:60]}  —  tác giả: {author}")
+        info = fetch_video_info(video_id)
+        title = info.get("desc") or info.get("description") or video_id
+        author = (info.get("author") or {}).get("nickname", "")
+        print(f"[3/4] Tiêu đề    : {title[:60]}  —  tác giả: {author}")
 
-    video_url = pick_video_url(info)
+        video_url = pick_video_url(info)
+        os.makedirs(out_dir, exist_ok=True)
+        name = filename or sanitize_filename(f"{video_id}_{title}", video_id) + ".mp4"
+        out_path = os.path.join(out_dir, name)
+
+        print(f"[4/4] Lưu vào    : {out_path}")
+        download_video(video_url, out_path)
+        print("✓ Hoàn tất.")
+        return out_path
+    except Exception as exc:
+        print(f"Phương án requests thất bại: {exc}")
+        print("→ Fallback sang f2 (xử lý X-Bogus/a_bogus tự động)...")
+        return download_with_f2(share_url, out_dir)
+
+
+def download_with_f2(share_url: str, out_dir: str) -> str:
+    """Fallback: dùng CLI `f2 douyin one_video` — xử lý signature Douyin đầy đủ."""
+    if shutil.which("f2") is None:
+        raise RuntimeError(
+            "Không có `f2` trong PATH. Cài: `pip install f2`, rồi chạy lại."
+        )
     os.makedirs(out_dir, exist_ok=True)
-    name = filename or sanitize_filename(f"{video_id}_{title}", video_id) + ".mp4"
-    out_path = os.path.join(out_dir, name)
-
-    print(f"[4/4] Lưu vào    : {out_path}")
-    download_video(video_url, out_path)
-    print("✓ Hoàn tất.")
-    return out_path
+    cmd = ["f2", "douyin", "one_video", "-u", share_url, "-p", out_dir]
+    print(f"  $ {' '.join(cmd)}")
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"f2 thất bại (exit {result.returncode}):\n"
+            f"stdout: {result.stdout[-500:]}\nstderr: {result.stderr[-500:]}"
+        )
+    mp4s = sorted(
+        glob.glob(os.path.join(out_dir, "**", "*.mp4"), recursive=True),
+        key=os.path.getmtime,
+        reverse=True,
+    )
+    if not mp4s:
+        raise RuntimeError(f"f2 chạy xong nhưng không tìm thấy mp4 trong {out_dir}")
+    print(f"✓ Hoàn tất qua f2: {mp4s[0]}")
+    return mp4s[0]
 
 
 def main() -> int:
