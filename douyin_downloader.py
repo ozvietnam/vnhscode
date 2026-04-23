@@ -213,15 +213,29 @@ def download_with_playwright(share_url: str, out_dir: str) -> str:
 
     captured_video_url: list[str] = []
     captured_aweme: list[dict] = []
+    debug_urls: list[str] = []
+
+    def is_real_video(url: str, ct: str) -> bool:
+        # Loại placeholder UI trên douyinstatic.com
+        if "douyinstatic.com" in url:
+            return False
+        if "douyinvod.com" in url or "zjcdn.com" in url:
+            return True
+        if "/video/tos/" in url:
+            return True
+        if ct.startswith("video/") and ("douyin" in url or "bytedance" in url):
+            return True
+        return False
 
     def on_response(resp):
         url = resp.url
         ct = (resp.headers or {}).get("content-type", "")
-        if "douyinvod.com" in url or "video/tos" in url or ct.startswith("video/"):
-            if url.endswith(".mp4") or "mime_type=video_mp4" in url or ct.startswith("video/"):
-                captured_video_url.append(url)
-        # Bắt response JSON chứa aweme detail
-        if "aweme" in url and "json" in ct:
+        if is_real_video(url, ct):
+            captured_video_url.append(url)
+        # Bắt response JSON chứa aweme detail — log mọi URL chứa 'aweme'
+        if "aweme" in url.lower():
+            debug_urls.append(f"{resp.status} {ct[:30]} {url[:120]}")
+        if "aweme" in url.lower() and ("json" in ct or ct.startswith("text/")):
             try:
                 data = resp.json()
             except Exception:
@@ -258,17 +272,40 @@ def download_with_playwright(share_url: str, out_dir: str) -> str:
         final_url = page.url
         aweme = page.evaluate(
             """() => {
-                const data = window._ROUTER_DATA || (() => {
-                    const t = document.getElementById('RENDER_DATA');
-                    return t ? JSON.parse(decodeURIComponent(t.textContent)) : null;
-                })();
-                if (!data) return null;
-                const loader = data.loaderData || data;
-                for (const v of Object.values(loader)) {
-                    if (!v || typeof v !== 'object') continue;
-                    if (v.aweme?.detail) return v.aweme.detail;
-                    if (v.videoInfoRes?.item_list?.[0]) return v.videoInfoRes.item_list[0];
-                    if (v.aweme?.awemeDetail) return v.aweme.awemeDetail;
+                function hasAweme(o) {
+                    return o && typeof o === 'object' && (o.aweme_id || o.awemeId) && (o.video || o.images);
+                }
+                function walk(o, depth) {
+                    if (!o || depth > 6) return null;
+                    if (hasAweme(o)) return o;
+                    if (Array.isArray(o)) {
+                        for (const x of o) { const r = walk(x, depth+1); if (r) return r; }
+                        return null;
+                    }
+                    if (typeof o !== 'object') return null;
+                    for (const k of ['aweme_detail','awemeDetail','aweme','detail','item_list','awemeList']) {
+                        if (k in o) { const v = o[k]; const r = walk(Array.isArray(v)?v[0]:v, depth+1); if (r) return r; }
+                    }
+                    for (const v of Object.values(o)) { const r = walk(v, depth+1); if (r) return r; }
+                    return null;
+                }
+                // 1. Global vars Douyin hay dùng
+                for (const g of ['_ROUTER_DATA','__INITIAL_STATE__','__INIT_PROPS__','_DATA']) {
+                    const r = walk(window[g], 0); if (r) return r;
+                }
+                // 2. RENDER_DATA tag
+                const t = document.getElementById('RENDER_DATA');
+                if (t) {
+                    try { const r = walk(JSON.parse(decodeURIComponent(t.textContent)), 0); if (r) return r; } catch(e){}
+                }
+                // 3. Mọi <script> tag JSON
+                for (const s of document.querySelectorAll('script')) {
+                    const txt = s.textContent || '';
+                    if (!txt.includes('aweme_id') && !txt.includes('awemeId')) continue;
+                    // Thử parse nguyên script, hoặc match substring {...}
+                    try { const r = walk(JSON.parse(txt), 0); if (r) return r; } catch(e){}
+                    const m = txt.match(/\\{[^{}]*"aweme_id"[\\s\\S]{20,50000}?\\}/);
+                    if (m) { try { const r = walk(JSON.parse(m[0]), 0); if (r) return r; } catch(e){} }
                 }
                 return null;
             }"""
@@ -279,6 +316,10 @@ def download_with_playwright(share_url: str, out_dir: str) -> str:
     if not aweme and captured_aweme:
         aweme = captured_aweme[-1]
         print(f"  Aweme detail capture từ API response ({len(captured_aweme)} candidates)")
+    if not aweme and debug_urls:
+        print("  Debug — các response chứa 'aweme' nhưng không parse được:")
+        for u in debug_urls[:10]:
+            print(f"    {u}")
     video_url = pick_video_url(aweme) if aweme else None
     if not video_url and captured_video_url:
         video_url = captured_video_url[-1]
