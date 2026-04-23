@@ -212,6 +212,7 @@ def download_with_playwright(share_url: str, out_dir: str) -> str:
         raise RuntimeError("Cài: pip install playwright && playwright install chromium") from e
 
     captured_video_url: list[str] = []
+    captured_aweme: list[dict] = []
 
     def on_response(resp):
         url = resp.url
@@ -219,6 +220,15 @@ def download_with_playwright(share_url: str, out_dir: str) -> str:
         if "douyinvod.com" in url or "video/tos" in url or ct.startswith("video/"):
             if url.endswith(".mp4") or "mime_type=video_mp4" in url or ct.startswith("video/"):
                 captured_video_url.append(url)
+        # Bắt response JSON chứa aweme detail
+        if "aweme" in url and "json" in ct:
+            try:
+                data = resp.json()
+            except Exception:
+                return
+            aw = _find_aweme_in(data)
+            if aw:
+                captured_aweme.append(aw)
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
@@ -266,6 +276,9 @@ def download_with_playwright(share_url: str, out_dir: str) -> str:
         cookies = ctx.cookies()
         browser.close()
 
+    if not aweme and captured_aweme:
+        aweme = captured_aweme[-1]
+        print(f"  Aweme detail capture từ API response ({len(captured_aweme)} candidates)")
     video_url = pick_video_url(aweme) if aweme else None
     if not video_url and captured_video_url:
         video_url = captured_video_url[-1]
@@ -300,6 +313,31 @@ def _fetch_to_file(url: str, path: str, headers: dict) -> None:
         with open(path, "wb") as f:
             for chunk in r.iter_content(64 * 1024):
                 f.write(chunk)
+
+
+def _find_aweme_in(obj, depth: int = 0):
+    """Tìm recursive object có aweme_id + video trong response JSON bất kỳ."""
+    if depth > 6 or obj is None:
+        return None
+    if isinstance(obj, dict):
+        if ("aweme_id" in obj or "awemeId" in obj) and ("video" in obj or "images" in obj):
+            return obj
+        for k in ("aweme_detail", "awemeDetail", "aweme", "detail", "item_list", "awemeList"):
+            if k in obj:
+                v = obj[k]
+                found = _find_aweme_in(v[0] if isinstance(v, list) and v else v, depth + 1)
+                if found:
+                    return found
+        for v in obj.values():
+            found = _find_aweme_in(v, depth + 1)
+            if found:
+                return found
+    elif isinstance(obj, list):
+        for v in obj:
+            found = _find_aweme_in(v, depth + 1)
+            if found:
+                return found
+    return None
 
 
 def _first_url(block) -> Optional[str]:
