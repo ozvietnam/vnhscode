@@ -310,50 +310,123 @@ def download_with_playwright(share_url: str, out_dir: str) -> str:
                 return null;
             }"""
         )
-        cookies = ctx.cookies()
+
+        if not aweme and captured_aweme:
+            aweme = captured_aweme[-1]
+            print(f"  Aweme detail capture từ API response ({len(captured_aweme)} candidates)")
+        if not aweme and debug_urls:
+            print("  Debug — các response chứa 'aweme' nhưng không parse được:")
+            for u in debug_urls[:10]:
+                print(f"    {u}")
+        video_url = pick_video_url(aweme) if aweme else None
+        if not video_url and captured_video_url:
+            video_url = captured_video_url[-1]
+            print(f"  Dùng URL capture được từ network: {video_url[:80]}...")
+        if not video_url:
+            browser.close()
+            raise RuntimeError(
+                f"Không lấy được URL video. aweme={bool(aweme)}, captured={len(captured_video_url)}"
+            )
+        aweme = aweme or {}
+        vid = aweme.get("aweme_id") or aweme.get("awemeId")
+        if not vid:
+            m = re.search(r"/(?:video|note)/(\d+)", final_url or "")
+            vid = m.group(1) if m else "video"
+        title = aweme.get("desc") or aweme.get("description") or vid
+        out_path = os.path.join(out_dir, sanitize_filename(f"{vid}_{title}", vid) + ".mp4")
+
+        # Tải TRONG browser context → giữ nguyên cookie/UA/session đã ký URL
+        _fetch_via_playwright(ctx, video_url, out_path, referer="https://www.douyin.com/")
+        print(f"✓ Video: {out_path}")
+
+        save_extras_playwright(aweme, vid, out_dir, ctx)
         browser.close()
-
-    if not aweme and captured_aweme:
-        aweme = captured_aweme[-1]
-        print(f"  Aweme detail capture từ API response ({len(captured_aweme)} candidates)")
-    if not aweme and debug_urls:
-        print("  Debug — các response chứa 'aweme' nhưng không parse được:")
-        for u in debug_urls[:10]:
-            print(f"    {u}")
-    video_url = pick_video_url(aweme) if aweme else None
-    if not video_url and captured_video_url:
-        video_url = captured_video_url[-1]
-        print(f"  Dùng URL capture được từ network: {video_url[:80]}...")
-    if not video_url:
-        raise RuntimeError(
-            f"Không lấy được URL video. aweme={bool(aweme)}, captured={len(captured_video_url)}"
-        )
-    aweme = aweme or {}
-    vid = aweme.get("aweme_id") or aweme.get("awemeId")
-    if not vid:
-        m = re.search(r"/(?:video|note)/(\d+)", final_url or "")
-        vid = m.group(1) if m else "video"
-    title = aweme.get("desc") or aweme.get("description") or vid
-    out_path = os.path.join(out_dir, sanitize_filename(f"{vid}_{title}", vid) + ".mp4")
-    cookie_header = "; ".join(f"{c['name']}={c['value']}" for c in cookies)
-    headers = {
-        "User-Agent": DESKTOP_UA,
-        "Referer": "https://www.douyin.com/",
-        "Cookie": cookie_header,
-    }
-    _fetch_to_file(video_url, out_path, headers)
-    print(f"✓ Video: {out_path}")
-
-    save_extras(aweme, vid, out_dir, headers)
     return out_path
 
 
-def _fetch_to_file(url: str, path: str, headers: dict) -> None:
-    with requests.get(url, headers=headers, stream=True, timeout=60) as r:
-        r.raise_for_status()
-        with open(path, "wb") as f:
-            for chunk in r.iter_content(64 * 1024):
-                f.write(chunk)
+def _fetch_via_playwright(ctx, url: str, path: str, referer: str = "https://www.douyin.com/") -> None:
+    """Dùng APIRequestContext của Playwright để download — share session với browser."""
+    resp = ctx.request.get(url, headers={"Referer": referer}, timeout=60000)
+    if not resp.ok:
+        raise RuntimeError(f"{resp.status} {resp.status_text} {url[:120]}")
+    with open(path, "wb") as f:
+        f.write(resp.body())
+
+
+def save_extras_playwright(aweme: dict, vid: str, out_dir: str, ctx) -> None:
+    """Version của save_extras dùng Playwright ctx để fetch (giữ session)."""
+    if not aweme:
+        print("  (không có metadata → bỏ qua extras)")
+        return
+    base = os.path.join(out_dir, sanitize_filename(vid, vid))
+
+    try:
+        with open(base + ".info.json", "w", encoding="utf-8") as f:
+            json.dump(aweme, f, ensure_ascii=False, indent=2)
+        print(f"✓ Metadata: {base}.info.json")
+    except Exception as e:
+        print(f"  Lưu metadata fail: {e}")
+
+    video = aweme.get("video") or {}
+    targets = []
+    cover = _first_url(video.get("cover") or video.get("origin_cover"))
+    if cover: targets.append((cover, base + ".jpg", "Cover"))
+    dyn = _first_url(video.get("dynamic_cover"))
+    if dyn: targets.append((dyn, base + ".dynamic.webp", "Dynamic cover"))
+    music = aweme.get("music") or {}
+    audio = _first_url(music.get("play_url"))
+    if audio: targets.append((audio, base + ".mp3", f"Audio ({music.get('title','')})"))
+
+    captions = aweme.get("caption_infos") or []
+    for i, cap in enumerate(captions):
+        u = cap.get("url")
+        if not u: continue
+        lang = cap.get("lang") or cap.get("language") or f"track{i}"
+        fmt = (cap.get("format") or "srt").lower()
+        ext = fmt if fmt in ("srt", "vtt") else "srt"
+        targets.append((u, f"{base}.{lang}.{ext}", f"Phụ đề [{lang}]"))
+    if not captions:
+        print("  (video không có phụ đề auto)")
+
+    images = aweme.get("images") or []
+    for i, img in enumerate(images):
+        u = _first_url(img.get("url_list") or img.get("urlList") or img)
+        if u: targets.append((u, f"{base}.img{i+1:02d}.jpg", f"Slideshow {i+1}/{len(images)}"))
+
+    for url, path, label in targets:
+        try:
+            _fetch_via_playwright(ctx, url, path, referer="https://www.douyin.com/")
+            print(f"✓ {label}: {path}")
+        except Exception as e:
+            print(f"  {label} fail: {e}")
+
+    stats = aweme.get("statistics") or {}
+    author = aweme.get("author") or {}
+    text_extra = aweme.get("text_extra") or []
+    hashtags = [t.get("hashtag_name") for t in text_extra if t.get("hashtag_name")]
+    summary = {
+        "id": aweme.get("aweme_id") or vid,
+        "desc": aweme.get("desc"),
+        "author": author.get("nickname"),
+        "author_id": author.get("unique_id") or author.get("short_id"),
+        "create_time": aweme.get("create_time"),
+        "duration_ms": (video or {}).get("duration"),
+        "hashtags": hashtags,
+        "stats": {
+            "likes": stats.get("digg_count"),
+            "comments": stats.get("comment_count"),
+            "shares": stats.get("share_count"),
+            "plays": stats.get("play_count"),
+            "collects": stats.get("collect_count"),
+        },
+        "music": {"title": music.get("title"), "author": music.get("author")},
+    }
+    try:
+        with open(base + ".summary.json", "w", encoding="utf-8") as f:
+            json.dump(summary, f, ensure_ascii=False, indent=2)
+        print(f"✓ Summary: {base}.summary.json")
+    except Exception as e:
+        print(f"  Summary fail: {e}")
 
 
 def _find_aweme_in(obj, depth: int = 0):
@@ -393,112 +466,6 @@ def _first_url(block) -> Optional[str]:
         if lst:
             return lst[0]
     return None
-
-
-def save_extras(aweme: dict, vid: str, out_dir: str, headers: dict) -> None:
-    """Lưu cover, dynamic cover, audio, phụ đề, metadata JSON, slideshow nếu có."""
-    if not aweme:
-        print("  (không có metadata → bỏ qua extras)")
-        return
-    base = os.path.join(out_dir, sanitize_filename(vid, vid))
-
-    # 1. Metadata JSON
-    try:
-        with open(base + ".info.json", "w", encoding="utf-8") as f:
-            json.dump(aweme, f, ensure_ascii=False, indent=2)
-        print(f"✓ Metadata: {base}.info.json")
-    except Exception as e:
-        print(f"  Lưu metadata fail: {e}")
-
-    video = aweme.get("video") or {}
-
-    # 2. Cover HD
-    cover_url = _first_url(video.get("cover") or video.get("origin_cover"))
-    if cover_url:
-        try:
-            _fetch_to_file(cover_url, base + ".jpg", headers)
-            print(f"✓ Cover: {base}.jpg")
-        except Exception as e:
-            print(f"  Cover fail: {e}")
-
-    # 3. Dynamic cover (GIF preview)
-    dyn_url = _first_url(video.get("dynamic_cover"))
-    if dyn_url:
-        try:
-            _fetch_to_file(dyn_url, base + ".dynamic.webp", headers)
-            print(f"✓ Dynamic cover: {base}.dynamic.webp")
-        except Exception as e:
-            print(f"  Dynamic cover fail: {e}")
-
-    # 4. Audio / BGM
-    music = aweme.get("music") or {}
-    audio_url = _first_url(music.get("play_url"))
-    if audio_url:
-        try:
-            _fetch_to_file(audio_url, base + ".mp3", headers)
-            print(f"✓ Audio: {base}.mp3 — {music.get('title', '')}")
-        except Exception as e:
-            print(f"  Audio fail: {e}")
-
-    # 5. Phụ đề (auto-caption) nếu Douyin có
-    captions = aweme.get("caption_infos") or []
-    for i, cap in enumerate(captions):
-        url = cap.get("url")
-        if not url:
-            continue
-        lang = cap.get("lang") or cap.get("language") or f"track{i}"
-        fmt = (cap.get("format") or "srt").lower()
-        ext = fmt if fmt in ("srt", "vtt") else "srt"
-        path = f"{base}.{lang}.{ext}"
-        try:
-            _fetch_to_file(url, path, headers)
-            print(f"✓ Phụ đề [{lang}]: {path}")
-        except Exception as e:
-            print(f"  Phụ đề [{lang}] fail: {e}")
-    if not captions:
-        print("  (video không có phụ đề auto)")
-
-    # 6. Slideshow images (图集)
-    images = aweme.get("images") or []
-    for i, img in enumerate(images):
-        url = _first_url(img.get("url_list") or img.get("urlList") or img)
-        if not url:
-            continue
-        path = f"{base}.img{i+1:02d}.jpg"
-        try:
-            _fetch_to_file(url, path, headers)
-            print(f"✓ Slideshow {i+1}/{len(images)}: {path}")
-        except Exception as e:
-            print(f"  Slideshow {i+1} fail: {e}")
-
-    # 7. Summary thống kê
-    stats = aweme.get("statistics") or {}
-    author = aweme.get("author") or {}
-    text_extra = aweme.get("text_extra") or []
-    hashtags = [t.get("hashtag_name") for t in text_extra if t.get("hashtag_name")]
-    summary = {
-        "id": aweme.get("aweme_id") or vid,
-        "desc": aweme.get("desc"),
-        "author": author.get("nickname"),
-        "author_id": author.get("unique_id") or author.get("short_id"),
-        "create_time": aweme.get("create_time"),
-        "duration_ms": (video or {}).get("duration"),
-        "hashtags": hashtags,
-        "stats": {
-            "likes": stats.get("digg_count"),
-            "comments": stats.get("comment_count"),
-            "shares": stats.get("share_count"),
-            "plays": stats.get("play_count"),
-            "collects": stats.get("collect_count"),
-        },
-        "music": {"title": music.get("title"), "author": music.get("author")},
-    }
-    try:
-        with open(base + ".summary.json", "w", encoding="utf-8") as f:
-            json.dump(summary, f, ensure_ascii=False, indent=2)
-        print(f"✓ Summary: {base}.summary.json")
-    except Exception as e:
-        print(f"  Summary fail: {e}")
 
 
 def download_with_f2(share_url: str, out_dir: str) -> str:
