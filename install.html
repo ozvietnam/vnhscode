@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<title>Cài Douyin Downloader (Bookmarklet)</title>
+<style>
+body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:640px;margin:40px auto;padding:0 16px;color:#1a1a1a;line-height:1.6}
+a.bm{display:inline-block;padding:10px 18px;background:#fe2c55;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;margin:12px 0}
+code{background:#f3f4f6;padding:2px 6px;border-radius:4px}
+.steps{background:#f9fafb;padding:16px 24px;border-radius:8px;border:1px solid #e5e7eb}
+</style>
+</head>
+<body>
+<h1>Douyin Downloader — Bookmarklet</h1>
+<p>Không cần Tampermonkey, không cần extension.</p>
+
+<h2>Cài</h2>
+<div class="steps">
+<ol>
+<li>Hiện thanh Bookmarks của Chrome: <code>Cmd+Shift+B</code> (Mac) hoặc <code>Ctrl+Shift+B</code>.</li>
+<li><b>Kéo nút đỏ bên dưới</b> thả vào thanh Bookmarks:</li>
+</ol>
+<p style="text-align:center"><a class="bm" href="javascript:(function()%7Bfunction%20findRouterData()%7Bif(window._ROUTER_DATA)return%20window._ROUTER_DATA%3Bvar%20tag%3Ddocument.getElementById(%22RENDER_DATA%22)%3Bif(tag)%7Btry%7Breturn%20JSON.parse(decodeURIComponent(tag.textContent))%3B%7Dcatch(e)%7B%7D%7Dreturn%20null%3B%7Dfunction%20pickAweme(data)%7Bvar%20loader%3D(data%26%26data.loaderData)%7C%7Cdata%3Bfor(var%20k%20in%20loader)%7Bvar%20v%3Dloader%5Bk%5D%3Bif(!v%7C%7Ctypeof%20v!%3D%3D%22object%22)continue%3Bif(v.aweme%26%26v.aweme.detail)return%20v.aweme.detail%3Bif(v.videoInfoRes%26%26v.videoInfoRes.item_list%26%26v.videoInfoRes.item_list%5B0%5D)return%20v.videoInfoRes.item_list%5B0%5D%3Bif(v.aweme%26%26v.aweme.awemeDetail)return%20v.aweme.awemeDetail%3B%7Dreturn%20null%3B%7Dfunction%20pickUrl(aw)%7Bvar%20v%3D(aw%26%26aw.video)%7C%7C%7B%7D%3Bvar%20keys%3D%5B%22play_addr%22%2C%22playAddr%22%2C%22play_addr_h264%22%2C%22download_addr%22%5D%3Bfor(var%20i%3D0%3Bi%3Ckeys.length%3Bi%2B%2B)%7Bvar%20b%3Dv%5Bkeys%5Bi%5D%5D%3Bif(!b)continue%3Bvar%20list%3Db.url_list%7C%7Cb.urlList%7C%7C%5B%5D%3Bif(list.length)return%20String(list%5B0%5D).replace(%22playwm%22%2C%22play%22)%3B%7Dreturn%20null%3B%7Dfunction%20sanitize(n)%7Breturn(n%7C%7C%22douyin%22).replace(%2F%5B%5C%5C%2F%3A*%3F%22%3C%3E%7C%5Cr%5Cn%5Ct%5D%2Fg%2C%22_%22).slice(0%2C80)%3B%7Dvar%20data%3DfindRouterData()%3Bif(!data)return%20alert(%22Kh%C3%B4ng%20t%C3%ACm%20th%E1%BA%A5y%20_ROUTER_DATA.%20%C4%90%E1%BB%A3i%20trang%20load%20xong%20r%E1%BB%93i%20th%E1%BB%AD%20l%E1%BA%A1i.%22)%3Bvar%20aw%3DpickAweme(data)%3Bif(!aw)%7Bconsole.log(%22%5Bdy%5D%22%2Cdata)%3Breturn%20alert(%22Kh%C3%B4ng%20tr%C3%ADch%20%C4%91%C6%B0%E1%BB%A3c%20metadata.%20Xem%20console.%22)%3B%7Dvar%20url%3DpickUrl(aw)%3Bif(!url)%7Bconsole.log(%22%5Bdy%5D%22%2Caw)%3Breturn%20alert(%22Kh%C3%B4ng%20t%C3%ACm%20%C4%91%C6%B0%E1%BB%A3c%20URL%20video.%20Xem%20console.%22)%3B%7Dvar%20id%3Daw.aweme_id%7C%7Caw.awemeId%7C%7C%22video%22%3Bvar%20desc%3Daw.desc%7C%7Caw.description%7C%7C%22%22%3Bvar%20name%3Dsanitize(id%2B%22_%22%2Bdesc)%2B%22.mp4%22%3Bvar%20a%3Ddocument.createElement(%22a%22)%3Ba.href%3Durl%3Ba.download%3Dname%3Ba.target%3D%22_blank%22%3Ba.rel%3D%22noopener%22%3Bdocument.body.appendChild(a)%3Ba.click()%3Ba.remove()%3Bconsole.log(%22%5Bdy%5Ddownloading%22%2Curl%2C%22-%3E%22%2Cname)%3B%7D)()%3B">⬇ Tải video Douyin</a></p>
+</div>
+
+<h2>Dùng</h2>
+<ol>
+<li>Mở trang video Douyin (vd: dán <code>https://v.douyin.com/ltVY25xQeBQ/</code> vào Chrome, đợi trang load xong).</li>
+<li>Click bookmark <b>Tải video Douyin</b> trên thanh bookmark → file .mp4 (không watermark) tự tải về Downloads.</li>
+</ol>
+
+<h2>Lỗi?</h2>
+<p>Mở DevTools Console (<code>Cmd+Opt+I</code>), bấm bookmark lại, copy log bắt đầu bằng <code>[dy]</code> gửi mình.</p>
+</body>
+</html>
