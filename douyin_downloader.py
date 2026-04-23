@@ -211,6 +211,15 @@ def download_with_playwright(share_url: str, out_dir: str) -> str:
     except ImportError as e:
         raise RuntimeError("Cài: pip install playwright && playwright install chromium") from e
 
+    captured_video_url: list[str] = []
+
+    def on_response(resp):
+        url = resp.url
+        ct = (resp.headers or {}).get("content-type", "")
+        if "douyinvod.com" in url or "video/tos" in url or ct.startswith("video/"):
+            if url.endswith(".mp4") or "mime_type=video_mp4" in url or ct.startswith("video/"):
+                captured_video_url.append(url)
+
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
         ctx = browser.new_context(
@@ -218,12 +227,24 @@ def download_with_playwright(share_url: str, out_dir: str) -> str:
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
             ),
-            viewport={"width": 390, "height": 844},
+            viewport={"width": 1280, "height": 900},
         )
         page = ctx.new_page()
+        page.on("response", on_response)
         print(f"[3/5] Playwright mở: {share_url}")
-        page.goto(share_url, wait_until="networkidle", timeout=30000)
-        page.wait_for_function("window._ROUTER_DATA || document.getElementById('RENDER_DATA')", timeout=15000)
+        try:
+            page.goto(share_url, wait_until="domcontentloaded", timeout=45000)
+        except Exception as e:
+            print(f"  goto timeout (bỏ qua, tiếp tục): {e}")
+        try:
+            page.wait_for_function(
+                "window._ROUTER_DATA || document.getElementById('RENDER_DATA')",
+                timeout=30000,
+            )
+        except Exception:
+            pass
+        # Cho page chạy thêm để video URL được request
+        page.wait_for_timeout(4000)
         aweme = page.evaluate(
             """() => {
                 const data = window._ROUTER_DATA || (() => {
@@ -244,11 +265,15 @@ def download_with_playwright(share_url: str, out_dir: str) -> str:
         cookies = ctx.cookies()
         browser.close()
 
-    if not aweme:
-        raise RuntimeError("Playwright không tìm được metadata aweme")
-    video_url = pick_video_url(aweme)
+    video_url = pick_video_url(aweme) if aweme else None
+    if not video_url and captured_video_url:
+        video_url = captured_video_url[-1]
+        print(f"  Dùng URL capture được từ network: {video_url[:80]}...")
     if not video_url:
-        raise RuntimeError("Playwright lấy được aweme nhưng không ra URL video")
+        raise RuntimeError(
+            f"Không lấy được URL video. aweme={bool(aweme)}, captured={len(captured_video_url)}"
+        )
+    aweme = aweme or {}
     title = aweme.get("desc") or aweme.get("description") or aweme.get("aweme_id", "video")
     vid = aweme.get("aweme_id") or aweme.get("awemeId") or "video"
     out_path = os.path.join(out_dir, sanitize_filename(f"{vid}_{title}", vid) + ".mp4")
