@@ -255,6 +255,7 @@ def download_with_playwright(share_url: str, out_dir: str) -> str:
             viewport={"width": 1280, "height": 900},
         )
         page = ctx.new_page()
+        page.set_default_timeout(45000)
         page.on("response", on_response)
         print(f"[3/5] Playwright mở: {share_url}")
         try:
@@ -268,14 +269,14 @@ def download_with_playwright(share_url: str, out_dir: str) -> str:
             )
         except Exception:
             pass
-        # Trigger video play để browser request CDN video URL
+        # Fire-and-forget play để browser tự request CDN (không await Promise)
         try:
             page.evaluate(
-                "() => { const v = document.querySelector('video'); if (v) { v.muted = true; return v.play().catch(()=>{}); } }"
+                "() => { const v = document.querySelector('video'); if (v) { v.muted = true; v.play().catch(()=>{}); } }"
             )
         except Exception:
             pass
-        page.wait_for_timeout(5000)
+        page.wait_for_timeout(6000)
         final_url = page.url
         aweme = page.evaluate(
             """() => {
