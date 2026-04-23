@@ -10,6 +10,7 @@ Cách dùng:
 from __future__ import annotations
 
 import argparse
+import base64
 import glob
 import json
 import os
@@ -267,8 +268,14 @@ def download_with_playwright(share_url: str, out_dir: str) -> str:
             )
         except Exception:
             pass
-        # Cho page chạy thêm để video URL được request
-        page.wait_for_timeout(4000)
+        # Trigger video play để browser request CDN video URL
+        try:
+            page.evaluate(
+                "() => { const v = document.querySelector('video'); if (v) { v.muted = true; return v.play().catch(()=>{}); } }"
+            )
+        except Exception:
+            pass
+        page.wait_for_timeout(5000)
         final_url = page.url
         aweme = page.evaluate(
             """() => {
@@ -318,15 +325,19 @@ def download_with_playwright(share_url: str, out_dir: str) -> str:
             print("  Debug — các response chứa 'aweme' nhưng không parse được:")
             for u in debug_urls[:10]:
                 print(f"    {u}")
-        video_url = pick_video_url(aweme) if aweme else None
-        if not video_url and captured_video_url:
-            video_url = captured_video_url[-1]
-            print(f"  Dùng URL capture được từ network: {video_url[:80]}...")
-        if not video_url:
+        # Ưu tiên URL browser thật sự request (fresh signature) hơn URL từ metadata
+        candidates = list(captured_video_url)
+        if aweme:
+            u = pick_video_url(aweme)
+            if u and u not in candidates:
+                candidates.append(u)
+        if not candidates:
             browser.close()
             raise RuntimeError(
-                f"Không lấy được URL video. aweme={bool(aweme)}, captured={len(captured_video_url)}"
+                f"Không lấy được URL video. aweme={bool(aweme)}, captured=0"
             )
+        video_url = candidates[0]
+        print(f"  Candidates: {len(candidates)}, ưu tiên: {video_url[:80]}...")
         aweme = aweme or {}
         vid = aweme.get("aweme_id") or aweme.get("awemeId")
         if not vid:
@@ -335,26 +346,50 @@ def download_with_playwright(share_url: str, out_dir: str) -> str:
         title = aweme.get("desc") or aweme.get("description") or vid
         out_path = os.path.join(out_dir, sanitize_filename(f"{vid}_{title}", vid) + ".mp4")
 
-        # Tải TRONG browser context → giữ nguyên cookie/UA/session đã ký URL
-        _fetch_via_playwright(ctx, video_url, out_path, referer="https://www.douyin.com/")
+        # Tải qua fetch() trong page context → signature/cookie/origin khớp 100%
+        saved_video = False
+        last_err = None
+        for u in candidates:
+            try:
+                _fetch_in_page(page, u, out_path)
+                saved_video = True
+                break
+            except Exception as e:
+                last_err = e
+                print(f"  URL fail ({str(e)[:80]}), thử URL kế...")
+        if not saved_video:
+            browser.close()
+            raise RuntimeError(f"Tất cả {len(candidates)} URL đều fail, lỗi cuối: {last_err}")
         print(f"✓ Video: {out_path}")
 
-        save_extras_playwright(aweme, vid, out_dir, ctx)
+        save_extras_playwright(aweme, vid, out_dir, page)
         browser.close()
     return out_path
 
 
-def _fetch_via_playwright(ctx, url: str, path: str, referer: str = "https://www.douyin.com/") -> None:
-    """Dùng APIRequestContext của Playwright để download — share session với browser."""
-    resp = ctx.request.get(url, headers={"Referer": referer}, timeout=60000)
-    if not resp.ok:
-        raise RuntimeError(f"{resp.status} {resp.status_text} {url[:120]}")
+def _fetch_in_page(page, url: str, path: str) -> None:
+    """Fetch URL TRONG context của page Douyin (cùng origin/cookie/session)."""
+    b64 = page.evaluate(
+        """async (u) => {
+            const r = await fetch(u, { credentials: 'include', referrerPolicy: 'no-referrer-when-downgrade' });
+            if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
+            const buf = await r.arrayBuffer();
+            const bytes = new Uint8Array(buf);
+            let bin = '';
+            const chunk = 0x8000;
+            for (let i = 0; i < bytes.length; i += chunk) {
+                bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+            }
+            return btoa(bin);
+        }""",
+        url,
+    )
     with open(path, "wb") as f:
-        f.write(resp.body())
+        f.write(base64.b64decode(b64))
 
 
-def save_extras_playwright(aweme: dict, vid: str, out_dir: str, ctx) -> None:
-    """Version của save_extras dùng Playwright ctx để fetch (giữ session)."""
+def save_extras_playwright(aweme: dict, vid: str, out_dir: str, page) -> None:
+    """Tải extras qua fetch trong page context (cùng session với video)."""
     if not aweme:
         print("  (không có metadata → bỏ qua extras)")
         return
@@ -395,7 +430,7 @@ def save_extras_playwright(aweme: dict, vid: str, out_dir: str, ctx) -> None:
 
     for url, path, label in targets:
         try:
-            _fetch_via_playwright(ctx, url, path, referer="https://www.douyin.com/")
+            _fetch_in_page(page, url, path)
             print(f"✓ {label}: {path}")
         except Exception as e:
             print(f"  {label} fail: {e}")
