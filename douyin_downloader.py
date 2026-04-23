@@ -245,6 +245,7 @@ def download_with_playwright(share_url: str, out_dir: str) -> str:
             pass
         # Cho page chạy thêm để video URL được request
         page.wait_for_timeout(4000)
+        final_url = page.url
         aweme = page.evaluate(
             """() => {
                 const data = window._ROUTER_DATA || (() => {
@@ -274,8 +275,11 @@ def download_with_playwright(share_url: str, out_dir: str) -> str:
             f"Không lấy được URL video. aweme={bool(aweme)}, captured={len(captured_video_url)}"
         )
     aweme = aweme or {}
-    title = aweme.get("desc") or aweme.get("description") or aweme.get("aweme_id", "video")
-    vid = aweme.get("aweme_id") or aweme.get("awemeId") or "video"
+    vid = aweme.get("aweme_id") or aweme.get("awemeId")
+    if not vid:
+        m = re.search(r"/(?:video|note)/(\d+)", final_url or "")
+        vid = m.group(1) if m else "video"
+    title = aweme.get("desc") or aweme.get("description") or vid
     out_path = os.path.join(out_dir, sanitize_filename(f"{vid}_{title}", vid) + ".mp4")
     cookie_header = "; ".join(f"{c['name']}={c['value']}" for c in cookies)
     headers = {
