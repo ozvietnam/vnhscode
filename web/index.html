@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Douyin Downloader</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <div class="logo">🎵 Douyin Downloader</div>
+  <div class="sub">Dán link, thả file, hoặc paste nguyên đoạn chia sẻ — tự bắt link, scan, tải</div>
+</header>
+
+<main>
+  <section class="input-card">
+    <textarea id="urls" placeholder="Dán 1 hoặc nhiều link Douyin...&#10;Ví dụ:&#10;https://v.douyin.com/ltVY25xQeBQ/&#10;3.02 复制打开抖音... https://v.douyin.com/xxxxx/ ...&#10;&#10;Hoặc thả file .txt vào đây."></textarea>
+    <div class="controls">
+      <label class="file-btn">
+        <input type="file" id="file" accept=".txt,.csv,.md" hidden>
+        <span>📎 Chọn file</span>
+      </label>
+      <button id="scan" class="primary">🔍 Scan</button>
+      <span id="status"></span>
+    </div>
+  </section>
+
+  <section id="results"></section>
+</main>
+
+<template id="card-tmpl">
+  <div class="card">
+    <img class="cover" loading="lazy">
+    <div class="meta">
+      <div class="title"></div>
+      <div class="author"></div>
+      <div class="stats"></div>
+      <div class="hashtags"></div>
+    </div>
+    <div class="actions">
+      <a class="btn video" target="_blank" download>📹 Video</a>
+      <a class="btn cover-dl" target="_blank" download>🖼 Cover</a>
+      <a class="btn audio" target="_blank" download>🎵 Audio</a>
+      <a class="btn subtitle" target="_blank" download>💬 Phụ đề</a>
+      <button class="btn all">⬇ Tải tất cả</button>
+    </div>
+  </div>
+</template>
+
+<footer>
+  <small>Source: <a href="https://github.com/ozvietnam/vnhscode" target="_blank">github.com/ozvietnam/vnhscode</a> · Not affiliated with ByteDance</small>
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

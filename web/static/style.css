@@ -1,0 +1,143 @@
+* { box-sizing: border-box }
+body {
+  font-family: -apple-system, Segoe UI, Roboto, system-ui, sans-serif;
+  background: #0f1115;
+  color: #e5e7eb;
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+header {
+  padding: 28px 20px 20px;
+  text-align: center;
+  border-bottom: 1px solid #1f2937;
+}
+.logo { font-size: 28px; font-weight: 700; letter-spacing: -0.02em }
+.sub { color: #9ca3af; margin-top: 6px; font-size: 14px }
+main {
+  flex: 1;
+  max-width: 920px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 24px 20px 60px;
+}
+.input-card {
+  background: #151821;
+  border: 1px solid #1f2937;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 24px;
+}
+textarea {
+  width: 100%;
+  min-height: 140px;
+  background: #0f1115;
+  color: #e5e7eb;
+  border: 1px solid #1f2937;
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  resize: vertical;
+  outline: none;
+  transition: border-color .15s;
+}
+textarea:focus { border-color: #fe2c55 }
+textarea.drag { border-color: #fe2c55; background: #1a0d14 }
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+button, .file-btn span {
+  background: #1f2937;
+  color: #e5e7eb;
+  border: none;
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background .15s;
+  display: inline-block;
+}
+button:hover, .file-btn:hover span { background: #374151 }
+button.primary { background: #fe2c55; color: #fff; font-weight: 600 }
+button.primary:hover { background: #e01b44 }
+button:disabled { opacity: .5; cursor: not-allowed }
+#status { color: #9ca3af; font-size: 13px }
+#status.err { color: #f87171 }
+
+.card {
+  background: #151821;
+  border: 1px solid #1f2937;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 14px;
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 16px;
+}
+.card img.cover {
+  width: 120px;
+  height: 160px;
+  object-fit: cover;
+  border-radius: 8px;
+  background: #0f1115;
+}
+.card .title { font-weight: 600; margin-bottom: 4px; line-height: 1.35 }
+.card .author { color: #9ca3af; font-size: 13px }
+.card .stats { color: #9ca3af; font-size: 12px; margin-top: 8px }
+.card .hashtags { margin-top: 6px; font-size: 12px }
+.card .hashtags span {
+  background: #1f2937;
+  color: #9ca3af;
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin-right: 4px;
+  display: inline-block;
+  margin-top: 2px;
+}
+.actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.btn {
+  background: #1f2937;
+  color: #e5e7eb;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
+}
+.btn:hover { background: #374151 }
+.btn.all { background: #fe2c55; color: #fff; font-weight: 600 }
+.btn.all:hover { background: #e01b44 }
+.btn.hidden { display: none }
+
+.card.error {
+  border-color: #991b1b;
+  grid-template-columns: 1fr;
+}
+.card.error .title { color: #f87171 }
+.card.error .meta { color: #9ca3af; font-size: 13px }
+
+footer {
+  text-align: center;
+  padding: 20px;
+  color: #6b7280;
+  border-top: 1px solid #1f2937;
+}
+footer a { color: #9ca3af }
+
+@media (max-width: 600px) {
+  .card { grid-template-columns: 80px 1fr }
+  .card img.cover { width: 80px; height: 107px }
+}
