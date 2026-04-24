@@ -9,27 +9,73 @@
 <body>
 <header>
   <div class="logo">🎵 Douyin Downloader</div>
-  <div class="sub">Dán link, thả file, hoặc paste nguyên đoạn chia sẻ — tự bắt link, scan, tải</div>
+  <div class="sub">Dán link hoặc tìm kiếm theo từ khóa / hashtag — tích chọn — tải về</div>
 </header>
 
 <main>
-  <section class="input-card">
-    <textarea id="urls" placeholder="Dán 1 hoặc nhiều link Douyin...&#10;Ví dụ:&#10;https://v.douyin.com/ltVY25xQeBQ/&#10;3.02 复制打开抖音... https://v.douyin.com/xxxxx/ ...&#10;&#10;Hoặc thả file .txt vào đây."></textarea>
-    <div class="controls">
-      <label class="file-btn">
-        <input type="file" id="file" accept=".txt,.csv,.md" hidden>
-        <span>📎 Chọn file</span>
-      </label>
-      <button id="scan" class="primary">🔍 Scan</button>
-      <span id="status"></span>
+  <nav class="tabs">
+    <button class="tab active" data-tab="paste">📋 Dán link</button>
+    <button class="tab" data-tab="search">🔎 Tìm kiếm</button>
+  </nav>
+
+  <!-- TAB: PASTE -->
+  <section class="pane active" data-pane="paste">
+    <div class="input-card">
+      <textarea id="urls" placeholder="Dán 1 hoặc nhiều link Douyin...&#10;Ví dụ:&#10;https://v.douyin.com/ltVY25xQeBQ/&#10;3.02 复制打开抖音... https://v.douyin.com/xxxxx/ ...&#10;&#10;Hoặc thả file .txt vào đây."></textarea>
+      <div class="controls">
+        <label class="file-btn">
+          <input type="file" id="file" accept=".txt,.csv,.md" hidden>
+          <span>📎 Chọn file</span>
+        </label>
+        <button id="scan" class="primary">🔍 Scan</button>
+        <span id="status"></span>
+      </div>
     </div>
   </section>
 
+  <!-- TAB: SEARCH -->
+  <section class="pane" data-pane="search">
+    <div class="input-card">
+      <div class="search-row">
+        <select id="searchType">
+          <option value="keyword">Từ khóa</option>
+          <option value="hashtag">Hashtag ID</option>
+        </select>
+        <input type="text" id="searchQ" placeholder="Vd: 养虾, chinese food, #美食 ... (hashtag cần ch_id)">
+        <select id="searchSort">
+          <option value="0">Mặc định</option>
+          <option value="1">Nhiều like nhất</option>
+          <option value="2">Mới nhất</option>
+        </select>
+        <button id="searchBtn" class="primary">Tìm</button>
+      </div>
+      <div class="controls" style="margin-top: 8px">
+        <span id="searchStatus"></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- BULK SELECT BAR (hiện khi có items) -->
+  <div id="bulkbar" class="bulkbar hidden">
+    <label><input type="checkbox" id="selectAll"> Chọn tất cả (<span id="totalCount">0</span>)</label>
+    <span>Đã chọn: <b id="selectedCount">0</b></span>
+    <div class="spacer"></div>
+    <button class="btn-bulk" data-kind="video">⬇ Video đã chọn</button>
+    <button class="btn-bulk" data-kind="cover">🖼 Cover</button>
+    <button class="btn-bulk" data-kind="audio">🎵 Audio</button>
+    <button class="btn-bulk" data-kind="subtitle">💬 Phụ đề</button>
+  </div>
+
   <section id="results"></section>
+
+  <div id="loadMoreWrap" class="hidden" style="text-align:center;margin:20px 0">
+    <button id="loadMore" class="primary">Tải thêm kết quả</button>
+  </div>
 </main>
 
 <template id="card-tmpl">
   <div class="card">
+    <label class="select"><input type="checkbox" class="pick"></label>
     <img class="cover" loading="lazy">
     <div class="meta">
       <div class="title"></div>

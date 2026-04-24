@@ -119,6 +119,92 @@ def download_file(url: str, path: str, session: requests.Session) -> int:
     return size
 
 
+def search_keyword(
+    keyword: str,
+    session: Optional[requests.Session] = None,
+    offset: int = 0,
+    count: int = 15,
+    sort_type: int = 0,  # 0=综合, 1=最多点赞, 2=最新
+) -> dict:
+    """Search Douyin video theo từ khóa. Trả {items, cursor, has_more}."""
+    session = session or requests.Session()
+    session.headers.update({
+        "User-Agent": USERAGENT,
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Referer": f"https://www.douyin.com/search/{quote(keyword)}",
+    })
+    ensure_session_cookies(session)
+
+    params = dict(BASE_WEB_PARAMS)
+    params.update({
+        "keyword": keyword,
+        "search_channel": "aweme_video_web",
+        "sort_type": str(sort_type),
+        "publish_time": "0",
+        "search_source": "normal_search",
+        "query_correct_type": "1",
+        "is_filter_search": "0",
+        "from_group_id": "",
+        "offset": str(offset),
+        "count": str(count),
+    })
+    bogus = ABogus().get_value(params)
+    params["a_bogus"] = bogus
+
+    url = "https://www.douyin.com/aweme/v1/web/general/search/single/?" + urlencode(params, quote_via=quote)
+    resp = session.get(url, timeout=25)
+    resp.raise_for_status()
+    if not resp.text.strip():
+        raise RuntimeError("Search API trả empty (signature fail hoặc IP bị chặn)")
+    data = resp.json()
+    items = []
+    for row in data.get("data") or []:
+        aw = row.get("aweme_info") or row.get("aweme")
+        if aw and aw.get("aweme_id"):
+            items.append(aw)
+    return {
+        "items": items,
+        "cursor": data.get("cursor", offset + count),
+        "has_more": bool(data.get("has_more")),
+    }
+
+
+def search_hashtag(
+    hashtag_id: str,
+    session: Optional[requests.Session] = None,
+    cursor: int = 0,
+    count: int = 15,
+) -> dict:
+    """Search video theo hashtag ID (challenge ID). Trả {items, cursor, has_more}."""
+    session = session or requests.Session()
+    session.headers.update({"User-Agent": USERAGENT, "Referer": "https://www.douyin.com/"})
+    ensure_session_cookies(session)
+
+    params = dict(BASE_WEB_PARAMS)
+    params.update({
+        "ch_id": hashtag_id,
+        "cursor": str(cursor),
+        "count": str(count),
+        "type": "5",
+    })
+    bogus = ABogus().get_value(params)
+    params["a_bogus"] = bogus
+
+    url = "https://www.douyin.com/aweme/v1/web/challenge/aweme/?" + urlencode(params, quote_via=quote)
+    resp = session.get(url, timeout=25)
+    resp.raise_for_status()
+    if not resp.text.strip():
+        raise RuntimeError("Hashtag API trả empty")
+    data = resp.json()
+    items = [x for x in (data.get("aweme_list") or []) if x.get("aweme_id")]
+    return {
+        "items": items,
+        "cursor": data.get("cursor", cursor + count),
+        "has_more": bool(data.get("has_more")),
+    }
+
+
 def pick_video_url(aweme: dict) -> Optional[str]:
     """Chọn URL mp4 không watermark, ưu tiên bitrate cao."""
     video = aweme.get("video") or {}
