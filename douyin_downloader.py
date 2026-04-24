@@ -213,18 +213,18 @@ def download_with_playwright(share_url: str, out_dir: str) -> str:
         raise RuntimeError("Cài: pip install playwright && playwright install chromium") from e
 
     captured_video_url: list[str] = []
+    captured_bodies: dict[str, bytes] = {}
     captured_aweme: list[dict] = []
     debug_urls: list[str] = []
 
     def is_real_video(url: str, ct: str) -> bool:
-        # Loại placeholder UI trên douyinstatic.com
         if "douyinstatic.com" in url:
             return False
         if "douyinvod.com" in url or "zjcdn.com" in url:
             return True
         if "/video/tos/" in url:
             return True
-        if ct.startswith("video/") and ("douyin" in url or "bytedance" in url):
+        if ct.startswith("video/") and ("douyin" in url or "bytedance" in url or "localhost" in url):
             return True
         return False
 
@@ -233,7 +233,13 @@ def download_with_playwright(share_url: str, out_dir: str) -> str:
         ct = (resp.headers or {}).get("content-type", "")
         if is_real_video(url, ct):
             captured_video_url.append(url)
-        # Bắt response JSON chứa aweme detail — log mọi URL chứa 'aweme'
+            # Lưu luôn bytes mà browser đã nhận — bypass 403 re-fetch
+            try:
+                body = resp.body()
+                if body and (url not in captured_bodies or len(body) > len(captured_bodies[url])):
+                    captured_bodies[url] = body
+            except Exception:
+                pass
         if "aweme" in url.lower():
             debug_urls.append(f"{resp.status} {ct[:30]} {url[:120]}")
         if "aweme" in url.lower() and ("json" in ct or ct.startswith("text/")):
@@ -347,17 +353,28 @@ def download_with_playwright(share_url: str, out_dir: str) -> str:
         title = aweme.get("desc") or aweme.get("description") or vid
         out_path = os.path.join(out_dir, sanitize_filename(f"{vid}_{title}", vid) + ".mp4")
 
-        # Tải qua fetch() trong page context → signature/cookie/origin khớp 100%
+        # Thử lưu bytes đã capture trước (browser đã tải rồi, chắc chắn không 403)
         saved_video = False
         last_err = None
-        for u in candidates:
-            try:
-                _fetch_in_page(page, u, out_path)
+        # Pick URL có body dài nhất (video thật, loại init segment nhỏ)
+        bodies_sorted = sorted(captured_bodies.items(), key=lambda kv: -len(kv[1]))
+        if bodies_sorted:
+            url_biggest, body_biggest = bodies_sorted[0]
+            if len(body_biggest) > 50_000:  # > 50KB mới coi là video thật
+                with open(out_path, "wb") as f:
+                    f.write(body_biggest)
+                print(f"  Lưu từ bytes đã capture ({len(body_biggest):,} B): {url_biggest[:80]}...")
                 saved_video = True
-                break
-            except Exception as e:
-                last_err = e
-                print(f"  URL fail ({str(e)[:80]}), thử URL kế...")
+        # Fallback: fetch-in-page với các URL candidate
+        if not saved_video:
+            for u in candidates:
+                try:
+                    _fetch_in_page(page, u, out_path)
+                    saved_video = True
+                    break
+                except Exception as e:
+                    last_err = e
+                    print(f"  URL fail ({str(e)[:80]}), thử URL kế...")
         if not saved_video:
             browser.close()
             raise RuntimeError(f"Tất cả {len(candidates)} URL đều fail, lỗi cuối: {last_err}")
