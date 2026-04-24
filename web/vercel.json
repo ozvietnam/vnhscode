@@ -1,7 +1,8 @@
 {
   "functions": {
-    "api/extract.py": { "maxDuration": 30 },
-    "api/search.py":  { "maxDuration": 30 },
-    "api/proxy.py":   { "maxDuration": 60 }
+    "api/extract.py": { "maxDuration": 30, "includeFiles": "douyin_crawler/**" },
+    "api/search.py":  { "maxDuration": 30, "includeFiles": "douyin_crawler/**" },
+    "api/proxy.py":   { "maxDuration": 60, "includeFiles": "douyin_crawler/**" },
+    "api/ping.py":    { "maxDuration": 10, "includeFiles": "douyin_crawler/**" }
   }
 }
