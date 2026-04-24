@@ -146,13 +146,19 @@ def download(share_text: str, out_dir: str = ".", filename: Optional[str] = None
     print(f"[1/5] Link chia sẻ: {share_url}")
     os.makedirs(out_dir, exist_ok=True)
 
-    # Path 1: yt-dlp với cookie Chrome — robust nhất, maintainer cộng đồng fix liên tục
+    # Path 0: Pure Python signature — nhanh nhất (<1s), không cần browser
+    try:
+        return download_with_signature(share_url, out_dir)
+    except Exception as exc:
+        print(f"  Signature path không dùng được: {exc}")
+
+    # Path 1: yt-dlp với cookie Chrome — maintainer cộng đồng fix liên tục
     try:
         return download_with_ytdlp(share_url, out_dir)
     except Exception as exc:
         print(f"  yt-dlp không dùng được: {exc}")
 
-    # Path 2: Playwright headless — để chính browser thật tính a_bogus
+    # Path 2: Playwright headless — robust nhất, browser thật tự tính a_bogus
     try:
         return download_with_playwright(share_url, out_dir)
     except Exception as exc:
@@ -175,6 +181,108 @@ def download(share_text: str, out_dir: str = ".", filename: Optional[str] = None
 
     # Path 4: f2 CLI (có sẵn trước đó)
     return download_with_f2(share_url, out_dir)
+
+
+def download_with_signature(share_url: str, out_dir: str) -> str:
+    """Pure Python path — dùng a_bogus signature gọi Douyin web API."""
+    try:
+        from douyin_crawler import api as dapi
+    except ImportError as e:
+        raise RuntimeError(f"Signature crawler không load được: {e}") from e
+
+    session = requests.Session()
+    session.headers.update({"User-Agent": dapi.USERAGENT})
+    print(f"[sig] Resolve video_id...")
+    video_id, final_url = dapi.resolve_video_id(share_url, session)
+    print(f"[sig] Video ID: {video_id}")
+
+    aweme = dapi.fetch_aweme_detail(video_id, session)
+    title = aweme.get("desc") or video_id
+    author = (aweme.get("author") or {}).get("nickname", "")
+    print(f"[sig] Tiêu đề: {title[:60]} — tác giả: {author}")
+
+    video_url = dapi.pick_video_url(aweme)
+    if not video_url:
+        raise RuntimeError("Aweme metadata OK nhưng không có play URL")
+    vid = aweme.get("aweme_id") or video_id
+    out_path = os.path.join(out_dir, sanitize_filename(f"{vid}_{title}", vid) + ".mp4")
+    size = dapi.download_file(video_url, out_path, session)
+    print(f"✓ Video ({size:,} B): {out_path}")
+
+    save_extras_with_session(aweme, vid, out_dir, session)
+    return out_path
+
+
+def save_extras_with_session(aweme: dict, vid: str, out_dir: str, session) -> None:
+    """Lưu cover, dynamic cover, audio, phụ đề, slideshow — dùng requests.Session."""
+    if not aweme:
+        return
+    from douyin_crawler import api as dapi
+
+    base = os.path.join(out_dir, sanitize_filename(vid, vid))
+    try:
+        with open(base + ".info.json", "w", encoding="utf-8") as f:
+            json.dump(aweme, f, ensure_ascii=False, indent=2)
+        print(f"✓ Metadata: {base}.info.json")
+    except Exception as e:
+        print(f"  Metadata fail: {e}")
+
+    video = aweme.get("video") or {}
+    targets = []
+
+    cover = _first_url(video.get("cover") or video.get("origin_cover"))
+    if cover: targets.append((cover, base + ".jpg", "Cover"))
+    dyn = _first_url(video.get("dynamic_cover"))
+    if dyn: targets.append((dyn, base + ".dynamic.webp", "Dynamic cover"))
+    music = aweme.get("music") or {}
+    audio = _first_url(music.get("play_url"))
+    if audio: targets.append((audio, base + ".mp3", f"Audio ({music.get('title','')})"))
+
+    for i, cap in enumerate(aweme.get("caption_infos") or []):
+        u = cap.get("url")
+        if not u: continue
+        lang = cap.get("lang") or cap.get("language") or f"track{i}"
+        fmt = (cap.get("format") or "srt").lower()
+        ext = fmt if fmt in ("srt", "vtt") else "srt"
+        targets.append((u, f"{base}.{lang}.{ext}", f"Phụ đề [{lang}]"))
+
+    for i, img in enumerate(aweme.get("images") or []):
+        u = _first_url(img.get("url_list") or img.get("urlList") or img)
+        if u: targets.append((u, f"{base}.img{i+1:02d}.jpg", f"Slideshow {i+1}"))
+
+    for url, path, label in targets:
+        try:
+            dapi.download_file(url, path, session)
+            print(f"✓ {label}: {path}")
+        except Exception as e:
+            print(f"  {label} fail: {e}")
+
+    stats = aweme.get("statistics") or {}
+    author = aweme.get("author") or {}
+    hashtags = [t.get("hashtag_name") for t in (aweme.get("text_extra") or []) if t.get("hashtag_name")]
+    summary = {
+        "id": aweme.get("aweme_id") or vid,
+        "desc": aweme.get("desc"),
+        "author": author.get("nickname"),
+        "author_id": author.get("unique_id") or author.get("short_id"),
+        "create_time": aweme.get("create_time"),
+        "duration_ms": (video or {}).get("duration"),
+        "hashtags": hashtags,
+        "stats": {
+            "likes": stats.get("digg_count"),
+            "comments": stats.get("comment_count"),
+            "shares": stats.get("share_count"),
+            "plays": stats.get("play_count"),
+            "collects": stats.get("collect_count"),
+        },
+        "music": {"title": music.get("title"), "author": music.get("author")},
+    }
+    try:
+        with open(base + ".summary.json", "w", encoding="utf-8") as f:
+            json.dump(summary, f, ensure_ascii=False, indent=2)
+        print(f"✓ Summary: {base}.summary.json")
+    except Exception as e:
+        print(f"  Summary fail: {e}")
 
 
 def download_with_ytdlp(share_url: str, out_dir: str) -> str:
