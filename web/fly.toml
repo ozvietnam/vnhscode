@@ -1,0 +1,33 @@
+# Fly.io config — deploy to Singapore to bypass Douyin geo-fence.
+# Replace "douyin-api" with your chosen app name (must be globally unique).
+#
+# Deploy steps:
+#   1. Install flyctl: https://fly.io/docs/hands-on/install-flyctl/
+#   2. fly auth login
+#   3. cd web/
+#   4. fly launch --name douyin-api --region sin --dockerfile Dockerfile --no-deploy
+#   5. fly deploy
+#   6. Copy the URL (https://douyin-api.fly.dev) into vercel.json rewrites below.
+
+app = "douyin-api"
+primary_region = "sin"  # Singapore
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 50
+    soft_limit = 25
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512

@@ -2,6 +2,11 @@ const $ = (s) => document.querySelector(s);
 const $$ = (s) => document.querySelectorAll(s);
 const URL_RE = /https?:\/\/(?:v\.douyin\.com|www\.douyin\.com|www\.iesdouyin\.com)\/[^\s<>"']+/gi;
 
+// API_BASE: empty = same origin (works on Fly.io).
+// Set window.API_BASE = "https://douyin-api.fly.dev" in index.html <script> to
+// route Vercel frontend → Fly.io backend.
+const API_BASE = (window.API_BASE || "").replace(/\/$/, "");
+
 const urlsEl = $("#urls");
 const fileEl = $("#file");
 const scanBtn = $("#scan");
@@ -81,7 +86,7 @@ function renderCard(item) {
   }
 
   const cover = card.querySelector("img.cover");
-  cover.src = item.cover_url ? `/api/proxy?url=${encodeURIComponent(item.cover_url)}&name=cover.jpg` : "";
+  cover.src = item.cover_url ? `${API_BASE}/api/proxy?url=${encodeURIComponent(item.cover_url)}&name=cover.jpg` : "";
   cover.alt = item.title || "";
   cover.onerror = () => { cover.src = item.cover_url || ""; };
 
@@ -108,7 +113,7 @@ function renderCard(item) {
   };
   for (const [, v] of Object.entries(links)) {
     if (v.url) {
-      v.el.href = `/api/proxy?url=${encodeURIComponent(v.url)}&name=${encodeURIComponent(v.name)}`;
+      v.el.href = `${API_BASE}/api/proxy?url=${encodeURIComponent(v.url)}&name=${encodeURIComponent(v.name)}`;
     } else {
       v.el.classList.add("hidden");
     }
@@ -138,7 +143,7 @@ async function scan() {
   setStatus(statusEl, `Đang scan ${urls.length} link...`);
   scanBtn.disabled = true;
   try {
-    const r = await fetch("/api/extract", {
+    const r = await fetch(`${API_BASE}/api/extract`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ urls }),
@@ -194,7 +199,7 @@ async function runSearch(append = false) {
       offset: String(searchCursor),
       count: "15",
     });
-    const r = await fetch("/api/search?" + params.toString());
+    const r = await fetch(`${API_BASE}/api/search?` + params.toString());
     if (!r.ok) {
       const body = await r.json().catch(() => ({}));
       throw new Error(body.error || `API ${r.status}`);
