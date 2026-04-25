@@ -76,7 +76,7 @@ def ensure_session_cookies(session: requests.Session) -> None:
 
 
 def fetch_aweme_detail(aweme_id: str, session: Optional[requests.Session] = None) -> dict:
-    """Gọi /aweme/v1/web/aweme/detail/ với a_bogus signature."""
+    """Gọi /aweme/v1/web/aweme/detail/ với a_bogus signature, fallback sang iesdouyin."""
     session = session or requests.Session()
     session.headers.update({
         "User-Agent": USERAGENT,
@@ -86,23 +86,111 @@ def fetch_aweme_detail(aweme_id: str, session: Optional[requests.Session] = None
     })
     ensure_session_cookies(session)
 
+    # Path 1: Web API với a_bogus (geo-fenced với IP non-CN)
+    try:
+        return _fetch_web_api(aweme_id, session)
+    except Exception as e1:
+        first_err = str(e1)
+
+    # Path 2: iesdouyin.com share page → parse RENDER_DATA (đôi khi qua geo-fence)
+    try:
+        return _fetch_iesdouyin_share(aweme_id, session)
+    except Exception as e2:
+        # Path 3: iesdouyin iteminfo API (legacy mobile)
+        try:
+            return _fetch_iesdouyin_iteminfo(aweme_id, session)
+        except Exception as e3:
+            raise RuntimeError(
+                f"Cả 3 API đều fail.\n"
+                f"  web a_bogus: {first_err}\n"
+                f"  iesdouyin share: {e2}\n"
+                f"  iesdouyin iteminfo: {e3}\n"
+                f"Khả năng cao IP server bị geo-fence — deploy API ở region Asia."
+            )
+
+
+def _fetch_web_api(aweme_id: str, session: requests.Session) -> dict:
     params = dict(BASE_WEB_PARAMS)
     params["aweme_id"] = aweme_id
-
     bogus = ABogus().get_value(params)
     params["a_bogus"] = bogus
-
     url = "https://www.douyin.com/aweme/v1/web/aweme/detail/?" + urlencode(params, quote_via=quote)
     resp = session.get(url, timeout=20)
     resp.raise_for_status()
-    body = resp.text
-    if not body.strip():
-        raise RuntimeError("Douyin trả empty body (signature fail hoặc bị block)")
+    if not resp.text.strip():
+        raise RuntimeError("empty body (geo-fence)")
     data = resp.json()
     detail = data.get("aweme_detail") or data.get("item_list", [None])[0]
     if not detail:
-        raise RuntimeError(f"Response không có aweme_detail: keys={list(data.keys())[:6]}")
+        raise RuntimeError(f"no aweme_detail; keys={list(data.keys())[:6]}")
     return detail
+
+
+def _fetch_iesdouyin_share(aweme_id: str, session: requests.Session) -> dict:
+    """Parse RENDER_DATA từ trang share."""
+    url = f"https://www.iesdouyin.com/share/video/{aweme_id}/"
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) "
+            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1"
+        ),
+    }
+    resp = session.get(url, headers=headers, timeout=20)
+    resp.raise_for_status()
+    html = resp.text
+    if not html.strip():
+        raise RuntimeError("share page empty")
+    m = re.search(r'<script[^>]+id="RENDER_DATA"[^>]*>([^<]+)</script>', html)
+    if not m:
+        raise RuntimeError("không có RENDER_DATA")
+    import json as _json
+    from urllib.parse import unquote
+    payload = _json.loads(unquote(m.group(1)))
+    # Tìm aweme bằng walk
+    return _find_aweme_in_dict(payload)
+
+
+def _fetch_iesdouyin_iteminfo(aweme_id: str, session: requests.Session) -> dict:
+    """Legacy mobile API."""
+    url = f"https://www.iesdouyin.com/web/api/v2/aweme/iteminfo/?item_ids={aweme_id}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (iPhone) Mobile",
+        "Referer": f"https://www.iesdouyin.com/share/video/{aweme_id}/",
+    }
+    resp = session.get(url, headers=headers, timeout=15)
+    resp.raise_for_status()
+    if not resp.text.strip():
+        raise RuntimeError("empty body")
+    data = resp.json()
+    items = data.get("item_list") or []
+    if not items:
+        raise RuntimeError("item_list rỗng")
+    return items[0]
+
+
+def _find_aweme_in_dict(obj, depth: int = 0):
+    """Walk recursive tìm object có aweme_id + video."""
+    if depth > 8 or obj is None:
+        return None
+    if isinstance(obj, dict):
+        if ("aweme_id" in obj or "awemeId" in obj) and ("video" in obj or "images" in obj):
+            return obj
+        for k in ("aweme_detail", "awemeDetail", "aweme", "detail", "item_list", "videoInfoRes"):
+            if k in obj:
+                v = obj[k]
+                found = _find_aweme_in_dict(v[0] if isinstance(v, list) and v else v, depth + 1)
+                if found:
+                    return found
+        for v in obj.values():
+            found = _find_aweme_in_dict(v, depth + 1)
+            if found:
+                return found
+    elif isinstance(obj, list):
+        for v in obj:
+            found = _find_aweme_in_dict(v, depth + 1)
+            if found:
+                return found
+    return None
 
 
 def download_file(url: str, path: str, session: requests.Session) -> int:
