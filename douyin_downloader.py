@@ -121,6 +121,13 @@ def sanitize_filename(name: str, fallback: str) -> str:
     return name[:80] or fallback
 
 
+def make_video_dir(out_dir: str, vid: str, title: str) -> str:
+    """Tạo và trả về folder riêng cho video: <out_dir>/<vid>_<title>/."""
+    folder = os.path.join(out_dir, sanitize_filename(f"{vid}_{title}", vid))
+    os.makedirs(folder, exist_ok=True)
+    return folder
+
+
 def download_video(url: str, out_path: str) -> None:
     headers = {"User-Agent": DESKTOP_UA, "Referer": "https://www.douyin.com/"}
     with requests.get(url, headers=headers, stream=True, timeout=60) as resp:
@@ -171,8 +178,8 @@ def download(share_text: str, out_dir: str = ".", filename: Optional[str] = None
         info = fetch_video_info(video_id)
         title = info.get("desc") or info.get("description") or video_id
         video_url = pick_video_url(info)
-        name = filename or sanitize_filename(f"{video_id}_{title}", video_id) + ".mp4"
-        out_path = os.path.join(out_dir, name)
+        folder = make_video_dir(out_dir, video_id, title)
+        out_path = os.path.join(folder, filename or "video.mp4")
         download_video(video_url, out_path)
         print("✓ Hoàn tất qua requests.")
         return out_path
@@ -205,25 +212,26 @@ def download_with_signature(share_url: str, out_dir: str) -> str:
     if not video_url:
         raise RuntimeError("Aweme metadata OK nhưng không có play URL")
     vid = aweme.get("aweme_id") or video_id
-    out_path = os.path.join(out_dir, sanitize_filename(f"{vid}_{title}", vid) + ".mp4")
+    folder = make_video_dir(out_dir, vid, title)
+    out_path = os.path.join(folder, "video.mp4")
     size = dapi.download_file(video_url, out_path, session)
     print(f"✓ Video ({size:,} B): {out_path}")
 
-    save_extras_with_session(aweme, vid, out_dir, session)
+    save_extras_with_session(aweme, vid, folder, session)
     return out_path
 
 
-def save_extras_with_session(aweme: dict, vid: str, out_dir: str, session) -> None:
+def save_extras_with_session(aweme: dict, vid: str, folder: str, session) -> None:
     """Lưu cover, dynamic cover, audio, phụ đề, slideshow — dùng requests.Session."""
     if not aweme:
         return
     from douyin_crawler import api as dapi
 
-    base = os.path.join(out_dir, sanitize_filename(vid, vid))
+    info_path = os.path.join(folder, "info.json")
     try:
-        with open(base + ".info.json", "w", encoding="utf-8") as f:
+        with open(info_path, "w", encoding="utf-8") as f:
             json.dump(aweme, f, ensure_ascii=False, indent=2)
-        print(f"✓ Metadata: {base}.info.json")
+        print(f"✓ Metadata: {info_path}")
     except Exception as e:
         print(f"  Metadata fail: {e}")
 
@@ -231,12 +239,12 @@ def save_extras_with_session(aweme: dict, vid: str, out_dir: str, session) -> No
     targets = []
 
     cover = _first_url(video.get("cover") or video.get("origin_cover"))
-    if cover: targets.append((cover, base + ".jpg", "Cover"))
+    if cover: targets.append((cover, os.path.join(folder, "cover.jpg"), "Cover"))
     dyn = _first_url(video.get("dynamic_cover"))
-    if dyn: targets.append((dyn, base + ".dynamic.webp", "Dynamic cover"))
+    if dyn: targets.append((dyn, os.path.join(folder, "dynamic.webp"), "Dynamic cover"))
     music = aweme.get("music") or {}
     audio = _first_url(music.get("play_url"))
-    if audio: targets.append((audio, base + ".mp3", f"Audio ({music.get('title','')})"))
+    if audio: targets.append((audio, os.path.join(folder, "audio.mp3"), f"Audio ({music.get('title','')})"))
 
     for i, cap in enumerate(aweme.get("caption_infos") or []):
         u = cap.get("url")
@@ -244,11 +252,11 @@ def save_extras_with_session(aweme: dict, vid: str, out_dir: str, session) -> No
         lang = cap.get("lang") or cap.get("language") or f"track{i}"
         fmt = (cap.get("format") or "srt").lower()
         ext = fmt if fmt in ("srt", "vtt") else "srt"
-        targets.append((u, f"{base}.{lang}.{ext}", f"Phụ đề [{lang}]"))
+        targets.append((u, os.path.join(folder, f"sub.{lang}.{ext}"), f"Phụ đề [{lang}]"))
 
     for i, img in enumerate(aweme.get("images") or []):
         u = _first_url(img.get("url_list") or img.get("urlList") or img)
-        if u: targets.append((u, f"{base}.img{i+1:02d}.jpg", f"Slideshow {i+1}"))
+        if u: targets.append((u, os.path.join(folder, f"img{i+1:02d}.jpg"), f"Slideshow {i+1}"))
 
     for url, path, label in targets:
         try:
@@ -277,10 +285,11 @@ def save_extras_with_session(aweme: dict, vid: str, out_dir: str, session) -> No
         },
         "music": {"title": music.get("title"), "author": music.get("author")},
     }
+    summary_path = os.path.join(folder, "summary.json")
     try:
-        with open(base + ".summary.json", "w", encoding="utf-8") as f:
+        with open(summary_path, "w", encoding="utf-8") as f:
             json.dump(summary, f, ensure_ascii=False, indent=2)
-        print(f"✓ Summary: {base}.summary.json")
+        print(f"✓ Summary: {summary_path}")
     except Exception as e:
         print(f"  Summary fail: {e}")
 
@@ -289,7 +298,7 @@ def download_with_ytdlp(share_url: str, out_dir: str) -> str:
     """Path chính: yt-dlp tự dùng cookie từ Chrome của user."""
     if shutil.which("yt-dlp") is None:
         raise RuntimeError("Không có `yt-dlp` trong PATH. Cài: pip install -U yt-dlp")
-    tmpl = os.path.join(out_dir, "%(id)s_%(title).60B.%(ext)s")
+    tmpl = os.path.join(out_dir, "%(id)s_%(title).60B", "video.%(ext)s")
     cmd = [
         "yt-dlp",
         "--cookies-from-browser", "chrome",
@@ -459,7 +468,8 @@ def download_with_playwright(share_url: str, out_dir: str) -> str:
             m = re.search(r"/(?:video|note)/(\d+)", final_url or "")
             vid = m.group(1) if m else "video"
         title = aweme.get("desc") or aweme.get("description") or vid
-        out_path = os.path.join(out_dir, sanitize_filename(f"{vid}_{title}", vid) + ".mp4")
+        folder = make_video_dir(out_dir, vid, title)
+        out_path = os.path.join(folder, "video.mp4")
 
         # Thử lưu bytes đã capture trước (browser đã tải rồi, chắc chắn không 403)
         saved_video = False
@@ -488,7 +498,7 @@ def download_with_playwright(share_url: str, out_dir: str) -> str:
             raise RuntimeError(f"Tất cả {len(candidates)} URL đều fail, lỗi cuối: {last_err}")
         print(f"✓ Video: {out_path}")
 
-        save_extras_playwright(aweme, vid, out_dir, page)
+        save_extras_playwright(aweme, vid, folder, page)
         browser.close()
     return out_path
 
@@ -514,29 +524,29 @@ def _fetch_in_page(page, url: str, path: str) -> None:
         f.write(base64.b64decode(b64))
 
 
-def save_extras_playwright(aweme: dict, vid: str, out_dir: str, page) -> None:
+def save_extras_playwright(aweme: dict, vid: str, folder: str, page) -> None:
     """Tải extras qua fetch trong page context (cùng session với video)."""
     if not aweme:
         print("  (không có metadata → bỏ qua extras)")
         return
-    base = os.path.join(out_dir, sanitize_filename(vid, vid))
+    info_path = os.path.join(folder, "info.json")
 
     try:
-        with open(base + ".info.json", "w", encoding="utf-8") as f:
+        with open(info_path, "w", encoding="utf-8") as f:
             json.dump(aweme, f, ensure_ascii=False, indent=2)
-        print(f"✓ Metadata: {base}.info.json")
+        print(f"✓ Metadata: {info_path}")
     except Exception as e:
         print(f"  Lưu metadata fail: {e}")
 
     video = aweme.get("video") or {}
     targets = []
     cover = _first_url(video.get("cover") or video.get("origin_cover"))
-    if cover: targets.append((cover, base + ".jpg", "Cover"))
+    if cover: targets.append((cover, os.path.join(folder, "cover.jpg"), "Cover"))
     dyn = _first_url(video.get("dynamic_cover"))
-    if dyn: targets.append((dyn, base + ".dynamic.webp", "Dynamic cover"))
+    if dyn: targets.append((dyn, os.path.join(folder, "dynamic.webp"), "Dynamic cover"))
     music = aweme.get("music") or {}
     audio = _first_url(music.get("play_url"))
-    if audio: targets.append((audio, base + ".mp3", f"Audio ({music.get('title','')})"))
+    if audio: targets.append((audio, os.path.join(folder, "audio.mp3"), f"Audio ({music.get('title','')})"))
 
     captions = aweme.get("caption_infos") or []
     for i, cap in enumerate(captions):
@@ -545,14 +555,14 @@ def save_extras_playwright(aweme: dict, vid: str, out_dir: str, page) -> None:
         lang = cap.get("lang") or cap.get("language") or f"track{i}"
         fmt = (cap.get("format") or "srt").lower()
         ext = fmt if fmt in ("srt", "vtt") else "srt"
-        targets.append((u, f"{base}.{lang}.{ext}", f"Phụ đề [{lang}]"))
+        targets.append((u, os.path.join(folder, f"sub.{lang}.{ext}"), f"Phụ đề [{lang}]"))
     if not captions:
         print("  (video không có phụ đề auto)")
 
     images = aweme.get("images") or []
     for i, img in enumerate(images):
         u = _first_url(img.get("url_list") or img.get("urlList") or img)
-        if u: targets.append((u, f"{base}.img{i+1:02d}.jpg", f"Slideshow {i+1}/{len(images)}"))
+        if u: targets.append((u, os.path.join(folder, f"img{i+1:02d}.jpg"), f"Slideshow {i+1}/{len(images)}"))
 
     for url, path, label in targets:
         try:
@@ -582,10 +592,11 @@ def save_extras_playwright(aweme: dict, vid: str, out_dir: str, page) -> None:
         },
         "music": {"title": music.get("title"), "author": music.get("author")},
     }
+    summary_path = os.path.join(folder, "summary.json")
     try:
-        with open(base + ".summary.json", "w", encoding="utf-8") as f:
+        with open(summary_path, "w", encoding="utf-8") as f:
             json.dump(summary, f, ensure_ascii=False, indent=2)
-        print(f"✓ Summary: {base}.summary.json")
+        print(f"✓ Summary: {summary_path}")
     except Exception as e:
         print(f"  Summary fail: {e}")
 
